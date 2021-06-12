@@ -14,12 +14,11 @@ import pydicom
 
 import skimage.transform
 from collections import namedtuple, defaultdict
-from imgaug import augmenters as iaa
-
+from imgaug import augmenters as iaa  #image augmentation library
 
 import matplotlib.pyplot as plt
 
-from config import *
+from config import DATA_DIR, TRAIN_DIR
 
 class DetectionDataset(Dataset):
     def __init__(self, fold, is_training, img_size, images=None, augmentation_level=10, crop_source=1024):
@@ -30,8 +29,8 @@ class DetectionDataset(Dataset):
         self.augmentation_level = augmentation_level
         self.categories = ['No Lung Opacity / Not Normal', 'Normal', 'Lung Opacity']
 
-        samples = pd.read_csv('../input/stage_1_train_labels.csv')
-        samples = samples.merge(pd.read_csv('../input/folds.csv'), on='patientId', how='left')
+        samples = pd.read_csv(os.path.join(DATA_DIR, 'stage_2_train_labels.csv'))
+        samples = samples.merge(pd.read_csv(os.path.join(TRAIN_DIR, 'folds.csv')), on='patientId', how='left')
 
         if images is None:
             self.images = self.load_images(samples)
@@ -272,6 +271,6 @@ def check_performance():
 
 
 if __name__ == '__main__':
-    # check_dataset()
+    check_dataset()
     check_augmentations()
-    # check_performance()
+    check_performance()
