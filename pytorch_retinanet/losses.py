@@ -122,7 +122,7 @@ class FocalLoss(nn.Module):
                 targets = targets/torch.Tensor([[0.1, 0.1, 0.2, 0.2]]).cuda()
 
 
-                negative_indices = 1 - positive_indices
+                negative_indices = torch.logical_not(positive_indices)
 
                 regression_diff = torch.abs(targets - regression[positive_indices, :])
 
