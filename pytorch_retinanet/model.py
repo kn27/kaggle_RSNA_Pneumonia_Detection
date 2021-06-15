@@ -7,13 +7,20 @@ import torch.utils.model_zoo as model_zoo
 from .utils import BasicBlock, Bottleneck, BBoxTransform, ClipBoxes
 from .anchors import Anchors
 from . import losses
-from .lib.nms.pth_nms import pth_nms
+#from .lib.nms.pth_nms import pth_nms
+from torchvision import ops
 
 def nms(dets, thresh):
-    "Dispatch to either CPU or GPU NMS implementations.\
+    """Dispatch to either CPU or GPU NMS implementations.\
     Accept dets as tensor"""
     return pth_nms(dets, thresh)
 
+def nms_torchvision(boxes, scores, thresh):
+    """
+    New nms implementation by torchvision
+    """
+    return ops.nms(boxes, scores, thresh)
+    
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'resnet34': 'https://download.pytorch.org/models/resnet34-333f7ec4.pth',
@@ -313,7 +320,8 @@ class RetinaNet(nn.Module):
             scores = scores[:, scores_over_thresh, :]
 
             # use very low threshold of 0.05 as boxes should not overlap
-            anchors_nms_idx = nms(torch.cat([transformed_anchors, scores], dim=2)[0, :, :], 0.05)
+            anchors_nms_idx = nms_torchvision(transformed_anchors, scores, 0.05)
+            #anchors_nms_idx = nms(torch.cat([transformed_anchors, scores], dim=2)[0, :, :], 0.05)
 
             nms_scores, nms_class = classification[0, anchors_nms_idx, :].max(dim=1)
 
