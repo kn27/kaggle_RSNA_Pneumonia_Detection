@@ -18,10 +18,13 @@ from imgaug import augmenters as iaa  #image augmentation library
 
 import matplotlib.pyplot as plt
 
-from config import DATA_DIR, TRAIN_DIR
+from config import DATA_DIR, TRAIN_DIR, CACHE_DIR
 
 class DetectionDataset(Dataset):
-    def __init__(self, fold, is_training, img_size, images=None, augmentation_level=10, crop_source=1024):
+    def __init__(self, fold, is_training, img_size, images=None, augmentation_level=10, crop_source=1024, lite = True):
+        """
+        lite: use one fold of the full dataset
+        """
         self.fold = fold
         self.is_training = is_training
         self.img_size = img_size
@@ -30,17 +33,17 @@ class DetectionDataset(Dataset):
         self.categories = ['No Lung Opacity / Not Normal', 'Normal', 'Lung Opacity']
 
         samples = pd.read_csv(os.path.join(DATA_DIR, 'stage_2_train_labels.csv'))
-        samples = samples.merge(pd.read_csv(os.path.join(TRAIN_DIR, 'folds.csv')), on='patientId', how='left')
+        samples = samples.merge(pd.read_csv(os.path.join(DATA_DIR, 'folds.csv')), on='patientId', how='left')
 
+        if lite or not is_training:
+            self.samples = samples[samples.fold == fold]
+        else:
+            self.samples = samples[samples.fold != fold]
+        
         if images is None:
-            self.images = self.load_images(samples)
+            self.images = self.load_images(self.samples)
         else:
             self.images = images
-
-        if is_training:
-            self.samples = samples[samples.fold != fold]
-        else:
-            self.samples = samples[samples.fold == fold]
 
         self.patient_ids = list(sorted(self.samples.patientId.unique()))
         self.patient_categories = {}
@@ -59,14 +62,15 @@ class DetectionDataset(Dataset):
                     [x + w / 3, y],
                     [x + w * 2 / 3, y],
                     [x + w / 3, y + h],
-                    [x + w * 2 / 3, y + h],
+                    [x + w * 2 / 3, y + h], # FODO: Why do you need 8 points here?
                 ])
                 self.annotations[patient_id].append(points)
 
     def load_images(self, samples):
         try:
             images = pickle.load(open(f'{CACHE_DIR}/train_images.pkl', 'rb'))
-        except FileNotFoundError:
+            assert all([list(samples.patientId)[i] in images.keys() for i in range(10)]) # no good if you don't have this assertion 
+        except (FileNotFoundError,AssertionError):
             os.makedirs(CACHE_DIR, exist_ok=True)
             images = {}
             for patient_id in tqdm(list(sorted(samples.patientId.unique()))):
@@ -79,7 +83,7 @@ class DetectionDataset(Dataset):
             pickle.dump(images, open(f'{CACHE_DIR}/train_images.pkl', 'wb'))
         return images
 
-    def load_image(self, patient_id):
+    def load_image(self, patient_id): #FODO: I didn't know you can have multiple signature like that!
         if patient_id in self.images:
             return self.images[patient_id]
         else:
@@ -106,7 +110,8 @@ class DetectionDataset(Dataset):
             img_source_h, img_source_w = img.shape[:2]
 
         img_h, img_w = img.shape[:2]
-
+        
+        # transform image
         augmentation_sigma = {
             10: dict(scale=0.1, angle=5.0, shear=2.5, gamma=0.2, hflip=False),
             15: dict(scale=0.15, angle=6.0, shear=4.0, gamma=0.2, hflip=np.random.choice([True, False])),
@@ -159,9 +164,8 @@ class DetectionDataset(Dataset):
                 )
                 crop = aug.augment_image(np.clip(np.stack([crop, crop, crop], axis=2) * 255, 0, 255).astype(np.uint8))[:,:,0].astype(np.float32) / 255.0
 
+        # transform annotation
         annotations = []
-        # print('patient_id', patient_id)
-
         for annotation in self.annotations[patient_id]:
             points = cfg.transform().inverse(annotation)
 
@@ -182,6 +186,12 @@ class DetectionDataset(Dataset):
         sample = {'img': crop, 'annot': annotations, 'scale': 1.0, 'category': self.patient_categories[patient_id]}
         return sample
 
+def visualize_single(img, annot):
+    plt.imshow(img)
+    p0 = annot[0:2]
+    p1 = annot[2:4]
+    plt.gca().add_patch(plt.Rectangle(p0, width=(p1-p0)[0], height=(p1-p0)[1], fill=False, edgecolor='r', linewidth=2))
+    plt.show()
 
 def check_dataset():
     with utils.timeit_context('load ds'):
@@ -207,16 +217,12 @@ def check_dataset():
 
     plt.figure()
     ds.is_training = True
-
-
     for sample in ds:
         plt.cla()
         plt.imshow(sample['img'])
         for annot in sample['annot']:
             p0 = annot[0:2]
             p1 = annot[2:4]
-
-            # print(p0, p1)
             plt.gca().add_patch(plt.Rectangle(p0, width=(p1-p0)[0], height=(p1-p0)[1], fill=False, edgecolor='r', linewidth=2))
         plt.show()
 
@@ -225,29 +231,24 @@ def check_augmentations():
     with utils.timeit_context('load ds'):
         ds = DetectionDataset(fold=0, is_training=True, img_size=512, images={}, augmentation_level=20)
 
-        sample_num = 2
+        sample_num = 1
 
         ds.is_training = False
         plt.imshow(ds[sample_num]['img'])
         for annot in ds[sample_num]['annot']:
             p0 = annot[0:2]
             p1 = annot[2:4]
-
-            # print(p0, p1)
             plt.gca().add_patch(
                 plt.Rectangle(p0, width=(p1 - p0)[0], height=(p1 - p0)[1], fill=False, edgecolor='r', linewidth=2))
 
         plt.figure()
         ds.is_training = True
-
-        for i in range(100):
+        for i in range(10):
             sample = ds[sample_num]
             plt.imshow(sample['img'])
             for annot in sample['annot']:
                 p0 = annot[0:2]
                 p1 = annot[2:4]
-
-                # print(p0, p1)
                 plt.gca().add_patch(
                     plt.Rectangle(p0, width=(p1 - p0)[0], height=(p1 - p0)[1], fill=False, edgecolor='r', linewidth=2))
             plt.show()
@@ -271,6 +272,7 @@ def check_performance():
 
 
 if __name__ == '__main__':
-    check_dataset()
-    check_augmentations()
-    check_performance()
+    print()
+    #check_dataset()
+    #check_augmentations()
+    #check_performance()
